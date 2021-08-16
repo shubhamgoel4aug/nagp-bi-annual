@@ -1,0 +1,90 @@
+pipeline {
+    agent any
+    
+    environment {
+        SONARQUBE = tool name: 'sonar_scanner_dotnet'
+    }
+    
+    stages {
+        
+        stage('clean') {
+            steps {
+                cleanWS()
+            }
+        }
+        
+        stage ('checkout') {
+            steps {
+                git branch: 'feature', url: 'https://github.com/shubhamgoel4aug/nagp-bi-annual.git'
+            }
+        }
+        
+        stage('Start SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv(credentialsId: 'Test_Sonar') {
+                    bat "${SONARQUBE}\\Sonar.Scanner.MsBuild.exe begin /n:nagp-bi-annual /k:nagp-bi-annual /v:1.0 /d:sonar:**/*.trx /d:sonar:**/*.coveragexml"
+                }
+            }
+        }
+        
+        stage('dotnet restore') {
+            steps {
+                bat 'dotnet restore'
+            }
+        }
+        
+        stage('build') {
+            steps {
+                bat 'dotnet build'
+            }
+        }
+        
+        stage('End SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv(credentialsId: 'Test_Sonar') {
+                    bat "${SONARQUBE}\\Sonar.Scanner.MsBuild.exe end"
+                }
+            }
+        }
+        
+        stage('Publish Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'DockerHub', passwordVariable: 'dockerPassword', usernameVariable: 'dockerUserName')]) {
+                    bat 'dotnet publish -o Publish -c Release'
+                    bat 'docker rmi nagp-bi-annual:dev -f'
+                    bat "docker build -f '${WORKSPACE}\\Publish\\Dockerfile' -t nagp-bi-annual:dev ${WORKSPACE}\\Publish"
+                    bat "docker login -u ${usernameVariable} -p ${passwordVariable}"
+                    bat "docker tag nagp-bi-annual:dev shubhamgoel02/nagp-bi-annual:${BUILD_NUMBER}"
+                    bat "docker tag nagp-bi-annual:dev shubhamgoel02/nagp-bi-annual:latest"
+                    bat 'docker push shubhamgoel02/nagp-bi-annual:${BUILD_NUMBER}'
+                    bat 'docker push shubhamgoel02/nagp-bi-annual:latest'
+                }
+                
+            }
+        }
+        
+        stage('Clean Deployment') {
+            steps {
+                powershell 'if($(docker ps --filter "publish=7400" -a -q) -ne $null) { docker rm $(docker ps --filter "publish=7400" -a -q) -f }'
+            }
+        }
+        
+        stage('Deployment') {
+            parallel {
+                stage('Docker') {
+                    steps {
+                        bat 'docker run -p 7400:7100 -e "deployment.branch:feature" shubhamgoel02/nagp-bi-annual:latest'
+                    }
+                    
+                }
+                stage('Kubernetes') {
+                    steps {
+                        bat 'kubectl config use-context gke_melodic-grail-321310_us-central1_kubernetes-cluster-shubhamgoel02'
+                        bat 'kubectl apply -f ${WORKSPACE}\\deployment.yml'
+                    }
+                }
+            }
+        }
+        
+    }
+}
