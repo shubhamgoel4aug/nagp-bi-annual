@@ -79,7 +79,7 @@ pipeline {
                 }
                 stage('Kubernetes') {
                     steps {
-                        bat 'kubectl config use-context gke_melodic-grail-321310_us-central1_kubernetes-cluster-shubhamgoel02'
+                        bat 'kubectl config use-context gke_melodic-grail-321310_us-central1_autopilot-cluster-1'
                         bat 'kubectl apply -f ${WORKSPACE}\\deployment.yml'
                     }
                 }
